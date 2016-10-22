@@ -4,7 +4,9 @@ namespace Dingo\Blueprint;
 
 use ReflectionClass;
 use RuntimeException;
+//use Dingo\Blueprint\Writer;
 use Illuminate\Support\Str;
+use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Filesystem\Filesystem;
 use Doctrine\Common\Annotations\AnnotationRegistry;
@@ -12,6 +14,14 @@ use Doctrine\Common\Annotations\SimpleAnnotationReader;
 
 class Blueprint
 {
+    protected $baseUrl;
+    /**
+     * Simple annotation reader instance.
+     *
+     * @var \Doctrine\Common\Annotations\SimpleAnnotationReader
+     */
+    protected $writer;
+
     /**
      * Simple annotation reader instance.
      *
@@ -37,12 +47,14 @@ class Blueprint
      * Create a new generator instance.
      *
      * @param \Doctrine\Common\Annotations\SimpleAnnotationReader $reader
-     * @param \Illuminate\Filesystem\Filesystem                   $files
+     * @param \Illuminate\Filesystem\Filesystem $files
      *
-     * @return void
+     * @param Writer $writer
      */
-    public function __construct(SimpleAnnotationReader $reader, Filesystem $files)
+    public function __construct(SimpleAnnotationReader $reader, Filesystem $files, Writer $writer)
     {
+        $this->baseUrl = 'http://git.i-nest.ir/a.amani/document-test/wikis/';
+        $this->writer = $writer;
         $this->reader = $reader;
         $this->files = $files;
 
@@ -59,24 +71,28 @@ class Blueprint
         $this->reader->addNamespace('Dingo\\Blueprint\\Annotation');
         $this->reader->addNamespace('Dingo\\Blueprint\\Annotation\\Method');
 
-        AnnotationRegistry::registerLoader(function ($class) {
-            $path = __DIR__.'/'.str_replace(['Dingo\\Blueprint\\', '\\'], ['', DIRECTORY_SEPARATOR], $class).'.php';
+        AnnotationRegistry::registerLoader(/**
+         * @param $class
+         * @return bool
+         */
+            function ($class) {
+                $path = __DIR__ . '/' . str_replace(['Dingo\\Blueprint\\', '\\'], ['', DIRECTORY_SEPARATOR], $class) . '.php';
 
-            if (file_exists($path)) {
-                require_once $path;
+                if (file_exists($path)) {
+                    require_once $path;
 
-                return true;
-            }
-        });
+                    return true;
+                }
+            });
     }
 
     /**
      * Generate documentation with the name and version.
      *
      * @param \Illuminate\Support\Collection $controllers
-     * @param string                         $name
-     * @param string                         $version
-     * @param string                         $includePath
+     * @param string $name
+     * @param string $version
+     * @param string $includePath
      *
      * @return bool
      */
@@ -94,13 +110,13 @@ class Blueprint
             // We'll also build up an array of actions on each resource.
             foreach ($controller->getMethods() as $method) {
                 if ($versionAnnotation = $this->reader->getMethodAnnotation($method, Annotation\Versions::class)) {
-                    if (! in_array($version, $versionAnnotation->value)) {
+                    if (!in_array($version, $versionAnnotation->value)) {
                         continue;
                     }
                 }
 
                 if ($annotations = $this->reader->getMethodAnnotations($method)) {
-                    if (! $actions->contains($method)) {
+                    if (!$actions->contains($method)) {
                         $actions->push(new Action($method, new Collection($annotations)));
                     }
                 }
@@ -122,114 +138,113 @@ class Blueprint
      * Generate the documentation contents from the resources collection.
      *
      * @param \Illuminate\Support\Collection $resources
-     * @param string                         $name
+     * @param string $name
      *
      * @return string
      */
     protected function generateContentsFromResources(Collection $resources, $name)
     {
         $contents = '';
-
         $contents .= $this->getFormat();
         $contents .= $this->line(2);
         $contents .= sprintf('# %s', $name);
         $contents .= $this->line(2);
 
-        $resources->each(function ($resource) use (&$contents) {
+        $content = ' [Home](' . $this->baseUrl . ')' . "\n";
+        $resources->each(function ($resource) use (&$contents, $content) {
+
             if ($resource->getActions()->isEmpty()) {
                 return;
             }
-
+            $contents .= $this->line(2);
             $contents .= $resource->getDefinition();
+            $contents .=  "\n" . '| Name: | Method: | Route: |'."\n";
+            $contents .= '| :-------- | :-------- | :-------- |' . "\n";
+            $content .= "\n" . $resource->getDefinition();
 
             if ($description = $resource->getDescription()) {
-                $contents .= $this->line();
-                $contents .= $description;
+                $content .= $this->line();
+                $content .= $description;
             }
 
-            if (($parameters = $resource->getParameters()) && ! $parameters->isEmpty()) {
-                $this->appendParameters($contents, $parameters);
+            if (($parameters = $resource->getParameters()) && !$parameters->isEmpty()) {
+                $this->appendParameters($content, $parameters);
             }
-
-            $resource->getActions()->each(function ($action) use (&$contents, $resource) {
-                $contents .= $this->line(2);
-                $contents .= $action->getDefinition();
+            $resource->getActions()->each(function ($action) use (&$contents, $content, $resource) {
+                $content .= "\n" . $action->getDefinition();
 
                 if ($description = $action->getDescription()) {
-                    $contents .= $this->line();
-                    $contents .= $description;
+                    $content .= $this->line();
+                    $content .= $description;
                 }
 
-                if (($attributes = $action->getAttributes()) && ! $attributes->isEmpty()) {
-                    $this->appendAttributes($contents, $attributes);
+                if (($attributes = $action->getAttributes()) && !$attributes->isEmpty()) {
+                    $this->appendAttributes($content, $attributes);
                 }
 
-                if (($parameters = $action->getParameters()) && ! $parameters->isEmpty()) {
-                    $this->appendParameters($contents, $parameters);
+                if (($parameters = $action->getParameters()) && !$parameters->isEmpty()) {
+                    $this->appendParameters($content, $parameters);
                 }
 
                 if ($request = $action->getRequest()) {
-                    $this->appendRequest($contents, $request, $resource);
+                    $this->appendRequest($content, $request, $resource);
                 }
 
                 if ($response = $action->getResponse()) {
-                    $this->appendResponse($contents, $response, $resource);
+                    $this->appendResponse($content, $response, $resource);
                 }
 
                 if ($transaction = $action->getTransaction()) {
                     foreach ($transaction->value as $value) {
                         if ($value instanceof Annotation\Request) {
-                            $this->appendRequest($contents, $value, $resource);
+                            $this->appendRequest($content, $value, $resource);
                         } elseif ($value instanceof Annotation\Response) {
-                            $this->appendResponse($contents, $value, $resource);
+                            $this->appendResponse($content, $value, $resource);
                         } else {
                             throw new RuntimeException('Unsupported annotation type given in transaction.');
                         }
                     }
                 }
+
+                $baseUrl = substr($action->getRoute(), 1);
+                $fileUrl = $this->getFileUrl($baseUrl, $action->getIdentifier());
+
+                $file = strtolower($action->getMethod()) . '-' . $fileUrl . '.md';
+                $this->writer->write(stripslashes(trim($content)), $this->includePath . '/' . $file);
+
+                $contents .= $this->generateLink($action->getMethod(), $fileUrl, $action->getHttpVerb(), $action->getRoute());
+
             });
-
-            $contents .= $this->line(2);
         });
-
-        return stripslashes(trim($contents));
+        return stripslashes($contents);
     }
 
     /**
-     * Append the attributes subsection to a resource or action.
+     * Get the API Blueprint format.
      *
-     * @param string                         $contents
-     * @param \Illuminate\Support\Collection $attributes
-     * @param int                            $indent
-     *
-     * @return void
+     * @return string
      */
-    protected function appendAttributes(&$contents, Collection $attributes, $indent = 0)
+    protected function getFormat()
     {
-        $this->appendSection($contents, 'Attributes', $indent);
+        return 'FORMAT: 1A';
+    }
 
-        $attributes->each(function ($attribute) use (&$contents, $indent) {
-            $contents .= $this->line();
-            $contents .= $this->tab(1 + $indent);
-            $contents .= sprintf('+ %s', $attribute->identifier);
-
-            if ($attribute->sample) {
-                $contents .= sprintf(': %s', $attribute->sample);
-            }
-
-            $contents .= sprintf(
-                ' (%s, %s) - %s',
-                $attribute->type,
-                $attribute->required ? 'required' : 'optional',
-                $attribute->description
-            );
-        });
+    /**
+     * Create a new line character.
+     *
+     * @param int $repeat
+     *
+     * @return string
+     */
+    protected function line($repeat = 1)
+    {
+        return str_repeat("\n", $repeat);
     }
 
     /**
      * Append the parameters subsection to a resource or action.
      *
-     * @param string                         $contents
+     * @param string $contents
      * @param \Illuminate\Support\Collection $parameters
      *
      * @return void
@@ -264,55 +279,84 @@ class Blueprint
     }
 
     /**
-     * Append a response subsection to an action.
+     * Append a subsection to an action.
      *
-     * @param string                               $contents
-     * @param \Dingo\Blueprint\Annotation\Response $response
-     * @param \Dingo\Blueprint\Resource            $resource
+     * @param string $contents
+     * @param string $name
+     * @param int $indent
+     * @param int $lines
      *
      * @return void
      */
-    protected function appendResponse(&$contents, Annotation\Response $response, Resource $resource)
+    protected function appendSection(&$contents, $name, $indent = 0, $lines = 2)
     {
-        $this->appendSection($contents, sprintf('Response %s', $response->statusCode));
+        $contents .= $this->line($lines);
+        $contents .= $this->tab($indent);
+        $contents .= '+ ' . $name;
+    }
 
-        if (isset($response->contentType)) {
-            $contents .= ' ('.$response->contentType.')';
-        }
+    /**
+     * Create a tab character.
+     *
+     * @param int $repeat
+     *
+     * @return string
+     */
+    protected function tab($repeat = 1)
+    {
+        return str_repeat('    ', $repeat);
+    }
 
-        if (! empty($response->headers) || $resource->hasResponseHeaders()) {
-            $this->appendHeaders($contents, array_merge($resource->getResponseHeaders(), $response->headers));
-        }
+    /**
+     * Append the attributes subsection to a resource or action.
+     *
+     * @param string $contents
+     * @param \Illuminate\Support\Collection $attributes
+     * @param int $indent
+     *
+     * @return void
+     */
+    protected function appendAttributes(&$contents, Collection $attributes, $indent = 0)
+    {
+        $this->appendSection($contents, 'Attributes', $indent);
 
-        if (isset($response->attributes)) {
-            $this->appendAttributes($contents, collect($response->attributes), 1);
-        }
+        $attributes->each(function ($attribute) use (&$contents, $indent) {
+            $contents .= $this->line();
+            $contents .= $this->tab(1 + $indent);
+            $contents .= sprintf('+ %s', $attribute->identifier);
 
-        if (isset($response->body)) {
-            $this->appendBody($contents, $this->prepareBody($response->body, $response->contentType));
-        }
+            if ($attribute->sample) {
+                $contents .= sprintf(': %s', $attribute->sample);
+            }
+
+            $contents .= sprintf(
+                ' (%s, %s) - %s',
+                $attribute->type,
+                $attribute->required ? 'required' : 'optional',
+                $attribute->description
+            );
+        });
     }
 
     /**
      * Append a request subsection to an action.
      *
-     * @param string                              $contents
+     * @param string $contents
      * @param \Dingo\Blueprint\Annotation\Request $request
-     * @param \Dingo\Blueprint\Resource           $resource
+     * @param Resource|Resource $resource
      *
-     * @return void
      */
     protected function appendRequest(&$contents, $request, Resource $resource)
     {
         $this->appendSection($contents, 'Request');
 
         if (isset($request->identifier)) {
-            $contents .= ' '.$request->identifier;
+            $contents .= ' ' . $request->identifier;
         }
 
-        $contents .= ' ('.$request->contentType.')';
+        $contents .= ' (' . $request->contentType . ')';
 
-        if (! empty($request->headers) || $resource->hasRequestHeaders()) {
+        if (!empty($request->headers) || $resource->hasRequestHeaders()) {
             $this->appendHeaders($contents, array_merge($resource->getRequestHeaders(), $request->headers));
         }
 
@@ -322,6 +366,25 @@ class Blueprint
 
         if (isset($request->body)) {
             $this->appendBody($contents, $this->prepareBody($request->body, $request->contentType));
+        }
+    }
+
+    /**
+     * Append a headers subsection to an action.
+     *
+     * @param string $contents
+     * @param array $headers
+     *
+     * @return void
+     */
+    protected function appendHeaders(&$contents, array $headers)
+    {
+        $this->appendSection($contents, 'Headers', 1, 1);
+
+        $contents .= $this->line();
+
+        foreach ($headers as $header => $value) {
+            $contents .= $this->line() . $this->tab(3) . sprintf('%s: %s', $header, $value);
         }
     }
 
@@ -342,7 +405,7 @@ class Blueprint
         $line = strtok($body, "\r\n");
 
         while ($line !== false) {
-            $contents .= $this->tab(3).$line;
+            $contents .= $this->tab(3) . $line;
 
             $line = strtok("\r\n");
 
@@ -350,42 +413,6 @@ class Blueprint
                 $contents .= $this->line();
             }
         }
-    }
-
-    /**
-     * Append a headers subsection to an action.
-     *
-     * @param string $contents
-     * @param array  $headers
-     *
-     * @return void
-     */
-    protected function appendHeaders(&$contents, array $headers)
-    {
-        $this->appendSection($contents, 'Headers', 1, 1);
-
-        $contents .= $this->line();
-
-        foreach ($headers as $header => $value) {
-            $contents .= $this->line().$this->tab(3).sprintf('%s: %s', $header, $value);
-        }
-    }
-
-    /**
-     * Append a subsection to an action.
-     *
-     * @param string $contents
-     * @param string $name
-     * @param int    $indent
-     * @param int    $lines
-     *
-     * @return void
-     */
-    protected function appendSection(&$contents, $name, $indent = 0, $lines = 2)
-    {
-        $contents .= $this->line($lines);
-        $contents .= $this->tab($indent);
-        $contents .= '+ '.$name;
     }
 
     /**
@@ -401,11 +428,11 @@ class Blueprint
         if (is_string($body) && Str::startsWith($body, ['json', 'file'])) {
             list($type, $path) = explode(':', $body);
 
-            if (! Str::endsWith($path, '.json') && $type == 'json') {
+            if (!Str::endsWith($path, '.json') && $type == 'json') {
                 $path .= '.json';
             }
 
-            $body = $this->files->get($this->includePath.'/'.$path);
+            $body = $this->files->get($this->includePath . '/' . $path);
 
             json_decode($body);
 
@@ -422,36 +449,72 @@ class Blueprint
     }
 
     /**
-     * Create a new line character.
+     * Append a response subsection to an action.
      *
-     * @param int $repeat
+     * @param string $contents
+     * @param \Dingo\Blueprint\Annotation\Response $response
+     * @param Resource|Resource $resource
      *
-     * @return string
      */
-    protected function line($repeat = 1)
+    protected function appendResponse(&$contents, Annotation\Response $response, Resource $resource)
     {
-        return str_repeat("\n", $repeat);
+        $this->appendSection($contents, sprintf('Response %s', $response->statusCode));
+
+        if (isset($response->contentType)) {
+            $contents .= ' (' . $response->contentType . ')';
+        }
+
+        if (!empty($response->headers) || $resource->hasResponseHeaders()) {
+            $this->appendHeaders($contents, array_merge($resource->getResponseHeaders(), $response->headers));
+        }
+
+        if (isset($response->attributes)) {
+            $this->appendAttributes($contents, collect($response->attributes), 1);
+        }
+
+        if (isset($response->body)) {
+            $this->appendBody($contents, $this->prepareBody($response->body, $response->contentType));
+        }
     }
 
     /**
-     * Create a tab character.
-     *
-     * @param int $repeat
-     *
+     * @param $baseUrl
+     * @param $identifier
      * @return string
      */
-    protected function tab($repeat = 1)
+    protected function getFileUrl($baseUrl, $identifier)
     {
-        return str_repeat('    ', $repeat);
+        $fileUrl = '';
+        if ($baseUrl == '') {
+            $fileUrl = strtolower(str_replace(' ', '-', $identifier));
+        } else {
+
+            $url = str_replace('/', '-', $baseUrl);
+            $fileUrl = $url;
+            $pattern = '/([-{]+[a-z]*+[}])/';
+            if (preg_match($pattern, $url)) {
+                $fileUrl = preg_replace($pattern, '', $url);
+            }
+        }
+        return $fileUrl;
     }
 
     /**
-     * Get the API Blueprint format.
-     *
+     * @param $method
+     * @param $fileUrl
+     * @param $httpVerb
+     * @param $route
      * @return string
      */
-    protected function getFormat()
+    protected function generateLink($method, $fileUrl, $httpVerb, $route)
     {
-        return 'FORMAT: 1A';
+        $pattern = '/([\n][ pagination sample ]+[?]+.*)/';
+        $httpVerb = preg_replace($pattern, '', $httpVerb);
+
+        $link = '';
+        $link .= '| [' . $httpVerb . '](' . $this->baseUrl . strtolower($method) . '-' . $fileUrl . ') | ';
+        $link .= strtolower($method) . ' | ' . $route . ' |' . "\n";
+
+        return $link;
     }
 }
