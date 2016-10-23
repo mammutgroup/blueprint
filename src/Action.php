@@ -32,10 +32,9 @@ class Action extends Section
     /**
      * Create a new action instance.
      *
-     * @param \ReflectionMethod              $reflector
+     * @param \ReflectionMethod $reflector
      * @param \Illuminate\Support\Collection $annotations
      *
-     * @return void
      */
     public function __construct(ReflectionMethod $reflector, Collection $annotations)
     {
@@ -61,6 +60,39 @@ class Action extends Section
         }
 
         return '## '.$definition;
+    }
+
+
+    /**
+     * get link title with style html
+     *
+     * @return string
+     */
+    public function getHttpVerb()
+    {
+        $definition = $this->getMethod();
+
+        if ($identifier = $this->getIdentifier()) {
+            if ($uri = $this->getUri()) {
+                $definition = $definition.' '.$uri;
+            }
+
+            $definition = $identifier;
+        }
+
+        return $definition;
+    }
+
+    /**
+     * Get the actions route
+     *
+     * @return string|void
+     */
+    public function getRoute()
+    {
+        if ($uri = $this->getUri()) {
+            return $uri;
+        }
     }
 
     /**
@@ -178,9 +210,8 @@ class Action extends Section
     /**
      * Set the parent resource on the action.
      *
-     * @param \Dingo\Blueprint\Resource $resource
+     * @param Resource|Resource $resource
      *
-     * @return void
      */
     public function setResource(Resource $resource)
     {
