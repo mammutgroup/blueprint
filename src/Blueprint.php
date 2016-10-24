@@ -4,9 +4,7 @@ namespace Dingo\Blueprint;
 
 use ReflectionClass;
 use RuntimeException;
-//use Dingo\Blueprint\Writer;
 use Illuminate\Support\Str;
-use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Filesystem\Filesystem;
 use Doctrine\Common\Annotations\AnnotationRegistry;
@@ -43,6 +41,7 @@ class Blueprint
      */
     protected $includePath;
 
+    protected $homeUrl;
     /**
      * Create a new generator instance.
      *
@@ -53,7 +52,8 @@ class Blueprint
      */
     public function __construct(SimpleAnnotationReader $reader, Filesystem $files, Writer $writer)
     {
-        $this->baseUrl = '';
+
+        $this->baseUrl = $this->parseEnv('WIKI_URL');
         $this->writer = $writer;
         $this->reader = $reader;
         $this->files = $files;
@@ -71,7 +71,8 @@ class Blueprint
         $this->reader->addNamespace('Dingo\\Blueprint\\Annotation');
         $this->reader->addNamespace('Dingo\\Blueprint\\Annotation\\Method');
 
-        AnnotationRegistry::registerLoader(/**
+        AnnotationRegistry::registerLoader(
+        /**
          * @param $class
          * @return bool
          */
@@ -93,11 +94,13 @@ class Blueprint
      * @param string $name
      * @param string $version
      * @param string $includePath
-     *
+     * @param $file
      * @return bool
      */
     public function generate(Collection $controllers, $name, $version, $includePath)
     {
+        $this->getInputFile();
+
         $this->includePath = $includePath;
 
         $resources = $controllers->map(function ($controller) use ($version) {
@@ -150,7 +153,7 @@ class Blueprint
         $contents .= sprintf('# %s', $name);
         $contents .= $this->line(2);
 
-        $content = ' [Home](' . $this->baseUrl . '/home)' . "\n";
+        $content = ' [Home](' . $this->baseUrl . $this->homeUrl . ')' . "\n";
         $resources->each(function ($resource) use (&$contents, $content) {
 
             if ($resource->getActions()->isEmpty()) {
@@ -211,7 +214,7 @@ class Blueprint
 
                 $file = strtolower($action->getMethod()) . '-' . $fileUrl . '.md';
                 $this->writer->write(stripslashes(trim($content)), $this->includePath . '/' . $file);
-                
+
                 $contents .= $this->generateLink($action->getMethod(), $fileUrl, $action->getHttpVerb(), $action->getRoute());
 
             });
@@ -516,5 +519,45 @@ class Blueprint
         $link .= strtolower($method) . ' | ' . $route . ' |' . "\n";
 
         return $link;
+    }
+
+    /**
+     * @param $key
+     * @return string
+     */
+    protected function parseEnv($key)
+    {
+        $wikiUrl = env($key);
+        if (!empty($wikiUrl)) {
+            return $wikiUrl;
+        }
+
+        return '';
+    }
+
+    protected function getInputFile()
+    {
+        $file = '';
+        foreach ($_SERVER['argv'] as $key=>$arg) {
+            if ($arg == '--output-file'){
+                $file = isset($_SERVER['argv'][$key+1]) ? $_SERVER['argv'][$key+1] : '';
+                break;
+            }
+
+            $matches = explode('=', $arg);
+            if (!empty($matches[1])){
+                $file = $matches[1];
+                break;
+            }
+        }
+
+        if (!empty($file)) {
+            if (preg_match('/\/([a-z]*|[A-Z]*)[.]([a-z]*|[A-Z]*)/', $file, $matches))
+            {
+                $this->homeUrl = str_replace('.md', '', $matches[1]);
+            } else {
+                $this->homeUrl = str_replace('.md', '', $file);
+            }
+        }
     }
 }
