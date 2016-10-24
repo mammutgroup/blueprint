@@ -150,7 +150,7 @@ class Blueprint
         $contents .= sprintf('# %s', $name);
         $contents .= $this->line(2);
 
-        $content = ' [Home](' . $this->baseUrl . ')' . "\n";
+        $content = ' [Home](' . $this->baseUrl . '/home)' . "\n";
         $resources->each(function ($resource) use (&$contents, $content) {
 
             if ($resource->getActions()->isEmpty()) {
