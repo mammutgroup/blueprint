@@ -495,8 +495,8 @@ class Blueprint
             $url = str_replace('/', '-', $baseUrl);
             $fileUrl = $url;
             $pattern = '/([-{]+[a-z]*+[}])/';
-            if (preg_match($pattern, $url)) {
-                $fileUrl = preg_replace($pattern, '', $url);
+            if (preg_match($pattern, $url, $matches)) {
+                $fileUrl = str_replace('{', '', str_replace('}', '', $url));
             }
         }
         return $fileUrl;
